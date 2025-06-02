@@ -27,6 +27,7 @@ import { addRange, getRanges, updateRanges } from '@/actions'
 import { useToast } from '@/hooks/use-toast'
 import { Icons } from '@/components/icons'
 import { cn } from '@/lib/utils'
+import { AlertSensorSpecific, Threshold } from './AlertSensorSpecific'
 
 type SensorData = {
   time: string,
@@ -41,6 +42,7 @@ interface CardProps {
   chartData: SensorData[]
   predictData: SensorData[]
   deviceId: string
+  threshold: Threshold
 }
 
 const FormSchema = z.object({
@@ -52,10 +54,13 @@ const FormSchema = z.object({
   }),
 })
 
-export function Card({ title, icon, value, unit, texts, chartData, predictData, deviceId }: CardProps) {
+export function Card({ title, icon, value, unit, texts, chartData, predictData, deviceId, threshold }: CardProps) {
   const { toast } = useToast()
   const [isPending, startTransition] = useTransition()
   const [isOpen, setIsOpen] = useState<boolean>(false)
+
+  const latest = <T extends { value: number }>(arr: T[]) =>
+    arr.length ? arr[arr.length - 1].value : NaN
 
 
   const form = useForm<z.infer<typeof FormSchema>>({
@@ -207,6 +212,7 @@ export function Card({ title, icon, value, unit, texts, chartData, predictData, 
 
             console.log('data >>>>', data)
           }} className='w-full'>Get data</Button> */}
+          <AlertSensorSpecific sensor={title} value={latest(chartData)} thresholds={threshold} />
           <LineChartData realData={chartData} predictData={predictData} title={title} deviceId={deviceId} />
         </DialogContent>
       </Dialog>

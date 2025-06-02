@@ -109,10 +109,10 @@ export const MapInterface = () => {
                 ws.onmessage = (evt) => {
                     const msg = JSON.parse(evt.data)
                     const d = msg.data || {}
-                    const pH = parseFloat(d.pH?.[0]?.[1])?.toFixed(0) ?? 'N/A'
-                    const ORP = parseFloat(d.ORP?.[0]?.[1])?.toFixed(0) ?? 'N/A'
-                    const TUR = parseFloat(d.TUR?.[0]?.[1])?.toFixed(0) ?? 'N/A'
-                    const EC = parseFloat(d.EC?.[0]?.[1])?.toFixed(0) ?? 'N/A'
+                    const pH = parseFloat(d.pH?.[0]?.[1])?.toFixed(2) ?? 'N/A'
+                    const ORP = parseFloat(d.ORP?.[0]?.[1])?.toFixed(2) ?? 'N/A'
+                    const TUR = parseFloat(d.TUR?.[0]?.[1])?.toFixed(2) ?? 'N/A'
+                    const EC = parseFloat(d.EC?.[0]?.[1])?.toFixed(2) ?? 'N/A'
 
                     popup.setHTML(`
                       <div>

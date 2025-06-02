@@ -20,8 +20,8 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
 
 const FormSchema = z.object({
-  monitoringTime: z.number().gte(30, {
-    message: 'You can only set the monitoring time with value greater or equal 30 seconds'
+  monitoringTime: z.number().gte(10, {
+    message: 'You can only set the monitoring time with value greater or equal 10 seconds'
   })
 })
 
@@ -31,7 +31,7 @@ export const SettingForm = ({ deviceId }: { deviceId: string }) => {
   const form = useForm<z.infer<typeof FormSchema>>({
     resolver: zodResolver(FormSchema),
     defaultValues: {
-      monitoringTime: 30
+      monitoringTime: 10
     }
   })
 
@@ -42,7 +42,7 @@ export const SettingForm = ({ deviceId }: { deviceId: string }) => {
     const { monitoringTime } = data
 
     try {
-      const res = await sendDataTb('monitoring', 'control', token, deviceId, monitoringTime)
+      const res = await sendDataTb('measurement_time', 'control', token, deviceId, monitoringTime)
 
       toast({
         title: "You submitted the following values:",

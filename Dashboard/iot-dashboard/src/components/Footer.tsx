@@ -22,6 +22,8 @@ import { toast, useToast } from '@/hooks/use-toast'
 import { createClient } from '@supabase/supabase-js'
 import { useTelemetry } from './context/TelemetryProvider'
 import { useGetUserSB } from '@/hooks/useGetUserSB'
+import { AlertSensor } from './AlertSensor'
+import { Threshold } from './AlertSensorSpecific'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -76,6 +78,35 @@ export function Footer({ deviceId }: { deviceId: string }) {
   // const [EC, setEC] = useState<SensorData[]>([])
 
   const { pH, ORP, EC, TUR, predictedPH, predictedORP, predictedTUR, predictedEC, executed_cronjob } = useTelemetry()
+
+  const phThreshHold: Threshold = {
+    good: [7.8, 8.5],
+    monitorDist: 0.3,
+    riskDist: 0.8,
+    severeDist: Infinity,
+  }
+
+  const orpThreshHold: Threshold = {
+    good: [200, 300],
+    monitorDist: 50,
+    riskDist: 100,
+    severeDist: Infinity,
+  }
+
+  const ecThreshHold: Threshold = {
+    good: [40000, 60000],
+    monitorDist: 5000,
+    riskDist: 10000,
+    severeDist: Infinity,
+  }
+
+  const turThreshHold: Threshold = {
+    good: [0, 10],
+    monitorDist: 5,
+    riskDist: 10,
+    severeDist: Infinity,
+  }
+
 
   const token = global?.window?.localStorage.getItem('token') ?? ''
   const res = useGetUserSB()
@@ -151,7 +182,7 @@ export function Footer({ deviceId }: { deviceId: string }) {
         const token = JSON.parse(JSON.stringify(localStorage.getItem('token')))
         const data = await getTelemetryTb(deviceId, token, ['pumpStatus'])
 
-        if (data?.pumpStatus.length > 0) {
+        if (data.pumpStatus[0].value && data?.pumpStatus.length > 0) {
           setSwitchState(data.pumpStatus[0].value === '0' ? false : true)
         }
       } catch (error) {
@@ -216,10 +247,11 @@ export function Footer({ deviceId }: { deviceId: string }) {
             className="rounded-md border"
           />
           <TaskModal isOpen={isOpen} isSetOpen={isSetOpen} date={date} setDate={setDate} /> */}
+          <AlertSensor></AlertSensor>
         </div>
         <div className="flex items-end">
           <div>
-            <Switch id="airplane-mode" checked={switchState} onCheckedChange={handleSwitch} />
+            <Switch id="airplane-mode" defaultValue={0} checked={switchState} onCheckedChange={handleSwitch} />
             <Label htmlFor="airplane-mode">
               Pump State: {switchState ? 'On' : 'Off'} Mode
             </Label>
@@ -271,6 +303,7 @@ export function Footer({ deviceId }: { deviceId: string }) {
               chartData={pH}
               predictData={predictedPH}
               deviceId={deviceId}
+              threshold={phThreshHold}
             />
           </SwiperSlide>
           <SwiperSlide>
@@ -283,6 +316,7 @@ export function Footer({ deviceId }: { deviceId: string }) {
               chartData={ORP}
               predictData={predictedORP}
               deviceId={deviceId}
+              threshold={orpThreshHold}
             />
           </SwiperSlide>
           <SwiperSlide>
@@ -295,6 +329,7 @@ export function Footer({ deviceId }: { deviceId: string }) {
               chartData={TUR}
               predictData={predictedTUR}
               deviceId={deviceId}
+              threshold={turThreshHold}
             />
           </SwiperSlide>
           <SwiperSlide>
@@ -307,6 +342,7 @@ export function Footer({ deviceId }: { deviceId: string }) {
               chartData={EC}
               predictData={predictedEC}
               deviceId={deviceId}
+              threshold={ecThreshHold}
             />
           </SwiperSlide>
         </Swiper>

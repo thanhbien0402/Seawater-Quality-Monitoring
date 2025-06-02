@@ -17,6 +17,8 @@ export function OTAModal({ deviceId, isInMap, deviceName }: { deviceId: string, 
     const [isOpen, setIsOpen] = useState<boolean>(false)
     const { currentFWVersion, fwVersion, fwTitle } = useTelemetry()
 
+    console.log('currentFW', currentFWVersion, typeof currentFWVersion)
+
     const token = global?.window?.localStorage.getItem('token') ?? ''
 
     return (

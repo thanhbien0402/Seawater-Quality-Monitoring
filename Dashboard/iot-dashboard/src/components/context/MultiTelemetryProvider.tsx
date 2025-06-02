@@ -7,16 +7,16 @@ import React, {
     useState,
     ReactNode,
 } from 'react'
-import { toast } from '@/hooks/use-toast'
 import { SelectedDeviceContext } from './SelectedDeviceProvider'
 
 export type DevTelemetry = {
     deviceId: string
     deviceName: string
-    pH: number[]
-    ORP: number[]
-    TUR: number[]
-    EC: number[]
+    pH: string[]
+    ORP: string[]
+    TUR: string[]
+    EC: string[]
+    monitoringTime: string[]
 }
 
 interface MultiTelemetryContextValue {
@@ -41,7 +41,8 @@ export function MultiTelemetryProvider({ children }: { children: ReactNode }) {
             deviceList.map((dev) => ({
                 deviceId: dev?.id.id,
                 deviceName: dev?.name,
-                pH: [], ORP: [], TUR: [], EC: []
+                pH: [], ORP: [], TUR: [], EC: [],
+                monitoringTime: []
             }))
         )
 
@@ -85,11 +86,13 @@ export function MultiTelemetryProvider({ children }: { children: ReactNode }) {
                         if (!dev) return
 
                         // Lấy giá trị mới nhất cho mỗi sensor
-                        const d = msg.data as Record<string, [number, number][]>
-                        const valuePH = d.pH?.[0]?.[1]
-                        const valueORP = d.ORP?.[0]?.[1]
-                        const valueTUR = d.TUR?.[0]?.[1]
-                        const valueEC = d.EC?.[0]?.[1]
+                        const d = msg.data as Record<string, [string, string][]>
+                        const valuePH = (d.predicted_pH?.[0]?.[1])
+                        const valueORP = (d.predicted_ORP?.[0]?.[1])
+                        const valueTUR = (d.predicted_TUR?.[0]?.[1])
+                        const valueEC = (d.predicted_EC?.[0]?.[1])
+                        const valueMT = (d.monitoring_time?.[0]?.[1])
+
 
                         // Cập nhật state
                         setTelemetry((prev) => {
@@ -111,6 +114,10 @@ export function MultiTelemetryProvider({ children }: { children: ReactNode }) {
                             if (valueEC != null) {
                                 const last = entry.EC[entry.EC.length - 1]
                                 if (last !== valueEC) entry.EC.push(valueEC)
+                            }
+                            if (valueMT != null) {
+                                const last = entry.monitoringTime[entry.monitoringTime.length - 1]
+                                if (last !== valueMT) entry.monitoringTime.push(valueMT)
                             }
                             copy[devIndex] = entry
                             return copy

@@ -1,8 +1,10 @@
+
 import React from 'react'
 import { AuthForm } from '../../components/forms/AuthForm'
 // import readUserSession from '@/actions'
 import { redirect } from 'next/navigation'
 import { Icons } from '@/components/icons'
+import SplineComponent from '@/components/SplineComponent'
 
 export default async function page() {
   // const { data } = await readUserSession()
@@ -20,6 +22,9 @@ export default async function page() {
               Seawater Quality Monitor
             </div>
             <div className="relative z-20 mt-auto">
+              {/* <div className="pointer-events-none touch-none overscroll-none absolute top-[-745px] w-[35vw] h-[50vh]"
+                onWheel={(e) => e.preventDefault()}
+                onTouchMove={(e) => e.preventDefault()}><SplineComponent /></div> */}
               <blockquote className="space-y-2">
                 <p className="text-lg">
                   &ldquo;Get real-time seawater quality updates with our advanced monitoring system in Xuan Dai Bay, Phu Yen Province, ensuring you stay informed about key water conditions and make timely decisions to protect the marine environment.&rdquo;

@@ -9,10 +9,7 @@ import {
     BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 import { Separator } from "@/components/ui/separator"
-import { cookies } from "next/headers"
 import { Toaster } from "@/components/ui/toaster"
-import MapClientWrapper from "@/components/wrappers/MapClientWrapper"
-import { getRanges } from "@/actions"
 import { MultiTelemetryProvider } from "@/components/context/MultiTelemetryProvider"
 import { SelectedDeviceProvider } from "@/components/context/SelectedDeviceProvider"
 
@@ -23,8 +20,8 @@ export default async function Layout({ children }: { children: React.ReactNode }
     // const defaultOpen = cookieStore.get("sidebar_state")?.value === "false"
 
     return (
-        <MultiTelemetryProvider>
-            <SelectedDeviceProvider>
+        <SelectedDeviceProvider>
+            <MultiTelemetryProvider>
                 <SidebarProvider defaultOpen={false} style={{
                     "--sidebar-width": "20rem",
                     "--sidebar-width-mobile": "20rem",
@@ -56,7 +53,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
                         <Toaster />
                     </main>
                 </SidebarProvider >
-            </SelectedDeviceProvider>
-        </MultiTelemetryProvider>
+            </MultiTelemetryProvider>
+        </SelectedDeviceProvider>
     )
 }

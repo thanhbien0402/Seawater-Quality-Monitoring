@@ -116,7 +116,7 @@ export async function getDeviceListInfo(pageSize: number, page: number, token: s
     }
 
     const response = await axios.get(
-      `/api/tenant/devices`,
+      `/api/customer/${process.env.TB_CUSTOMER_ID}/devices`,
       {
         params,
         ...header,
@@ -144,7 +144,15 @@ export async function addDevice(deviceName: string, token: string, accessToken: 
       "device": {
         "name": deviceName,
         "label": `Label_${deviceName}`,
-        "type": "default"
+        "type": "default",
+        "deviceProfileId": {
+          "id": `${process.env.TB_DEVICE_PROFILE_ID}`,
+          "entityType": "DEVICE_PROFILE"
+        },
+        "customerId": {
+          "id": `${process.env.TB_CUSTOMER_ID}`,
+          "entityType": "CUSTOMER"
+        }
       },
       "credentials": {
         "credentialsType": "ACCESS_TOKEN",
@@ -203,7 +211,7 @@ export async function sendDataTb(key: string, method: string, token: string, dev
         break;
       case 'control':
         body = {
-          [`control/${key}`]: `${(key == 'monitoring' ? (id * 1000) : (id == 1 ? 'ON' : 'OFF'))}`
+          [`control/${key}`]: `${(key == 'measurement_time' ? (id * 1000) : (id == 1 ? 'ON' : 'OFF'))}`
         }
         break;
       default:
