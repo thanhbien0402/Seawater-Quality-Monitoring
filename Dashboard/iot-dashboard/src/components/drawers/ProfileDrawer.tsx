@@ -11,15 +11,18 @@ import {
 import { Button } from '../ui/button'
 import { ProfileForm } from '../forms/ProfileForm'
 import { User } from 'lucide-react'
+import { Dispatch, SetStateAction } from 'react'
 
-export function ProfileDrawer() {
+export function ProfileDrawer({ isOpen, setIsOpen }: { isOpen: boolean, setIsOpen: Dispatch<SetStateAction<boolean>> }) {
   return (
-    <Drawer>
-      <DrawerTrigger asChild>
+    <Drawer open={isOpen} onOpenChange={(open) => {
+      setIsOpen(open)
+    }}>
+      {/* <DrawerTrigger asChild>
         <Button variant="ghost">
           <User className="h-4 w-4" />
         </Button>
-      </DrawerTrigger>
+      </DrawerTrigger> */}
       <DrawerContent>
         <DrawerHeader className="text-left">
           <DrawerTitle>Profile</DrawerTitle>

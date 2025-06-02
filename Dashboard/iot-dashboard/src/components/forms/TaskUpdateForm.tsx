@@ -25,8 +25,13 @@ import {
     SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { updateTask } from '@/actions'
+import { sendDataTb, updateTask } from '@/actions'
 import { useState } from 'react'
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover'
+import { CalendarIcon } from 'lucide-react'
+import { format, formatDate } from 'date-fns'
+import { Calendar } from '../ui/calendar'
+import { cn } from '@/lib/utils'
 
 type TData = {
     id: string
@@ -49,7 +54,7 @@ const formSchema = z.object({
     dot: z.any()
 })
 
-export const TaskUpdateForm = ({ updatedData, taskId, userId, loadTask }: { updatedData: TData, taskId: string, userId: string, loadTask: any }) => {
+export const TaskUpdateForm = ({ updatedData, taskId, userId, loadTask, deviceId, rpcID }: { updatedData: TData, taskId: string, userId: string, loadTask: any, deviceId: string, rpcID: number }) => {
     const { toast } = useToast()
 
     const form = useForm<z.infer<typeof formSchema>>({
@@ -68,13 +73,18 @@ export const TaskUpdateForm = ({ updatedData, taskId, userId, loadTask }: { upda
         const { time, type, trigger_type, dot } = values
         if (dot && time) {
             const task = {
-                task_date: new Date(modifiedDate),
+                task_date: formatDate(dot, 'yyyy-MM-dd'),
                 task_time: time,
                 task_type: type,
                 trigger_type: trigger_type
             }
 
+            const token = JSON.parse(JSON.stringify(localStorage.getItem('token')))
+
+
             const { data, error } = await updateTask(taskId, userId, task)
+            await sendDataTb(type, 'edit', token, deviceId, rpcID, dot, time, trigger_type)
+
             if (error) {
                 console.log('error >>>>>', error)
             } else {
@@ -90,8 +100,6 @@ export const TaskUpdateForm = ({ updatedData, taskId, userId, loadTask }: { upda
             }
         }
     }
-
-    const [modifiedDate, setDate] = useState<string>(updatedData.task_date)
 
     return (
         <Form {...form}>
@@ -149,10 +157,33 @@ export const TaskUpdateForm = ({ updatedData, taskId, userId, loadTask }: { upda
                         <FormItem className="flex flex-col">
                             <FormLabel>Date of Task</FormLabel>
                             <FormControl>
-                                <Input type='date' {...field} value={modifiedDate} onChange={(event) => {
+                                {/* <Input type='date' {...field} value={modifiedDate} onChange={(event) => {
                                     console.log('event >>>>>', event.target.value)
                                     setDate(event.target.value)
-                                }} />
+                                }} /> */}
+                                <Popover>
+                                    <PopoverTrigger asChild>
+                                        <Button
+                                            variant={"outline"}
+                                            className={cn(
+                                                "w-full justify-start text-left font-normal",
+                                                !field.value && "text-muted-foreground"
+                                            )}
+                                        >
+                                            <CalendarIcon />
+                                            {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-auto p-0 pointer-events-auto" align="start">
+                                        <Calendar
+                                            className='pointer-events-auto'
+                                            mode="single"
+                                            selected={field.value}
+                                            onSelect={field.onChange}
+                                            disabled={{ before: new Date() }}
+                                        />
+                                    </PopoverContent>
+                                </Popover>
                             </FormControl>
                             <FormDescription>
                                 Date of specific task to invoke

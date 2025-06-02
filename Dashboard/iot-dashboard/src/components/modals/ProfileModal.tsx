@@ -11,16 +11,15 @@ import {
 } from '../ui/dialog'
 import { ProfileForm } from '../forms/ProfileForm'
 import { User } from 'lucide-react'
+import { Dispatch, SetStateAction } from 'react'
 
-export function ProfileModal() {
+export function ProfileModal({ isOpen, setIsOpen }: { isOpen: boolean, setIsOpen: Dispatch<SetStateAction<boolean>> }) {
   return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Button variant="ghost" className="gap-1">
-          <User className="h-4 w-4" />
-          <p>Profile</p>
-        </Button>
-      </DialogTrigger>
+    <Dialog open={isOpen} onOpenChange={(open) => {
+      setIsOpen(open)
+    }}>
+      {/* <DialogTrigger asChild>
+      </DialogTrigger> */}
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>Profile</DialogTitle>

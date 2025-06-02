@@ -6,7 +6,6 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog"
 import { Dispatch, SetStateAction } from "react"
-import { Input } from '../ui/input'
 import { TaskForm } from "../forms/TaskForm"
 
 export const TaskModal = ({ isOpen, isSetOpen, date, setDate }: { isOpen: boolean, isSetOpen: Dispatch<SetStateAction<boolean>>, date: Date | undefined, setDate: Dispatch<SetStateAction<Date | undefined>> }) => {

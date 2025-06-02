@@ -1,14 +1,33 @@
 'use client'
+import { getDeviceListInfo, getTasks } from '@/actions'
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar'
 import { useGetUserSB } from '@/hooks/useGetUserSB'
+import { useEffect } from 'react'
 
 export const ProfileForm = () => {
   const res = useGetUserSB()
-  console.log('res >>>>', res)
   const email = res.userInfo?.session.user.email
   const avatarUrl = res.userInfo?.session.user.user_metadata.avatar_url
-  const userName = res.userInfo?.session.user.user_metadata.user_name
   const userFullName = res.userInfo?.session.user.user_metadata.full_name
+
+  useEffect(() => {
+    // ! Test
+    const test = async () => {
+      try {
+        const token = JSON.parse(JSON.stringify(localStorage.getItem('token')))
+        // const res = await getDeviceInfo('test', token)
+        // const res = await getDeviceListInfo(1, 1, token)
+        // const res = await getTasks('-846983168')
+        // const data = await getTelemetryTb('2ae615b0-192d-11f0-862b-b726a398b624', token, ['pH'])
+        console.log('res >>>', res)
+        // console.log('data >>>', data)
+      } catch (error) {
+        console.log(error)
+      }
+    }
+
+    test()
+  })
 
   return (
     <div>

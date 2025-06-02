@@ -18,14 +18,14 @@ type TData = {
     createdAt: string
 }
 
-export const TaskUpdateModal = ({ isOpen, isSetOpen, updatedData, taskId, userId, loadTask }: { isOpen: boolean, isSetOpen: Dispatch<SetStateAction<boolean>>, updatedData: TData, taskId: string, userId: string, loadTask: any }) => {
+export const TaskUpdateModal = ({ isOpen, isSetOpen, updatedData, taskId, userId, loadTask, deviceId, rpcID }: { isOpen: boolean, isSetOpen: Dispatch<SetStateAction<boolean>>, updatedData: TData, taskId: string, userId: string, loadTask: any, deviceId: string, rpcID: number }) => {
     return (
         <Dialog open={isOpen} onOpenChange={isSetOpen}>
             <DialogContent>
                 <DialogHeader>
                     <DialogTitle>Update Task</DialogTitle>
                 </DialogHeader>
-                <TaskUpdateForm updatedData={updatedData} taskId={taskId} userId={userId} loadTask={loadTask} />
+                <TaskUpdateForm updatedData={updatedData} taskId={taskId} userId={userId} loadTask={loadTask} deviceId={deviceId} rpcID={rpcID} />
             </DialogContent>
         </Dialog>
     )

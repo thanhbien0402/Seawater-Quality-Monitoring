@@ -3,12 +3,15 @@
 #include "./ESSensor/include/es_sensor.h"
 #include "./Global/include/global.h"
 #include "./OTA/include/ota.h"
+#include "./Model/include/model.h"
+#include "./GPS/include/gps.h"
+#include "./Cron/include/cronjob.h"
+#include "cJSON.h"
 
 // // #include <HTTPClient.h>
 // // #include "Update.h"
 // // #include <mbedtls/md.h> // SHA256
 
-// // #define CURRENT_FW_VERSION "1.0" 
 static const char *MQTT_TAG = "MQTT";
 static const char *TIMER_TAG = "TIMER";
 
@@ -16,13 +19,22 @@ WiFiClient espClient;
 PubSubClient client(espClient);
 
 TaskHandle_t mqttTaskHandle;
-TaskHandle_t publisherTaskHandle;
 TaskHandle_t sensor_task_handle;
-// static QueueHandle_t control_queue;
-EventGroupHandle_t mqtt_event_group;
+TaskHandle_t publish_executed_cronjob_handle = NULL;
 
+static QueueHandle_t control_queue = xQueueCreate(4, 200 * sizeof(char));
+
+EventGroupHandle_t mqtt_event_group = NULL;
+
+ControlDef control_def = {0};
+static const queue_map_t queue_table[] = {
+    {"control", &control_queue},
+};
+
+static TaskHandler subscribe_task_list[100];
+static uint8_t number_subscribe_task = 0;
 static esp_timer_handle_t periodic_timer;
-static uint32_t g_unix_get_timestamp = 0;
+// static uint32_t g_unix_get_timestamp = 0;
 uint64_t measurement_time = 60000;      // Read sensor data every 60 seconds
 
 volatile bool otaUpdateTriggered = false;
@@ -31,16 +43,61 @@ char receivedFwTitle[32] = {0}, receivedFwVersion[16] = {0};
 // MQTT topics
 const char* pubTopic = "v1/devices/me/telemetry";
 const char* subTopic = "v1/devices/me/rpc/request/+";
-// // const char* otaTopic = "v1/devices/me/attributes";
+const char* otaTopic = "v1/devices/me/attributes";
 
-static void periodic_timer_callback(void *arg)
-{
+static void save_measurement_time_to_nvs(uint64_t time) {
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open("nvs_data", NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(MQTT_TAG, "Failed to open NVS for saving measurement_time: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = nvs_set_u64(nvs_handle, "meas_time", time);
+    if (err != ESP_OK) {
+        ESP_LOGE(MQTT_TAG, "Failed to save measurement_time to NVS: %s", esp_err_to_name(err));
+    } else {
+        err = nvs_commit(nvs_handle);
+        if (err != ESP_OK) {
+            ESP_LOGE(MQTT_TAG, "Failed to commit measurement_time to NVS: %s", esp_err_to_name(err));
+        } else {
+            ESP_LOGI(MQTT_TAG, "Saved measurement_time to NVS: %lld seconds", time / 1000);
+        }
+    }
+
+    nvs_close(nvs_handle);
+}
+
+static void load_measurement_time_from_nvs() {
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open("nvs_data", NVS_READONLY, &nvs_handle);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(MQTT_TAG, "Failed to open NVS for loading measurement_time, using default: %s", esp_err_to_name(err));
+        return;
+    }
+
+    uint64_t saved_time = 0;
+    err = nvs_get_u64(nvs_handle, "meas_time", &saved_time);
+
+    if (err == ESP_OK && saved_time >= 10000) { // Ensure the saved time is reasonable
+        measurement_time = saved_time;
+        ESP_LOGI(MQTT_TAG, "Loaded measurement_time from NVS: %lld seconds", measurement_time / 1000);
+    } else {
+        ESP_LOGE(MQTT_TAG, "No saved measurement_time in NVS, using default: %s", esp_err_to_name(err));
+    }
+
+    nvs_close(nvs_handle);
+}
+
+static void periodic_timer_callback(void *arg) {
     // Notify the sensor task
     xTaskNotifyGive(sensor_task_handle);
 }
 
-void start_esp_timer()
-{
+void start_esp_timer() {
+    load_measurement_time_from_nvs();  // Load measurement time from NVS
+
     esp_timer_create_args_t periodic_timer_args = {
         .callback = &periodic_timer_callback,
         .name = "periodic_sensors_task_timer"
@@ -62,7 +119,7 @@ void start_esp_timer()
         return;
     }
 
-    ESP_LOGI(TIMER_TAG, "Start Periodic Timer successfully: %lld seconds!!!", measurement_time);
+    ESP_LOGI(TIMER_TAG, "Start Periodic Timer successfully: %lld seconds!!!", measurement_time / 1000);
 }
 
 void stop_esp_timer()
@@ -89,110 +146,14 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     }
     ESP_LOGI(MQTT_TAG, "Message: %s", message.c_str());
     
-    uint8_t topic_case = 0;
-    if (strcmp(topic, subTopic) == 0) {
-        ESP_LOGI(MQTT_TAG, "Received RPC request: %s", message.c_str());
-        topic_case = 0;
-    }
-    else if (strcmp(topic, "v1/devices/me/attributes") == 0) {
-        ESP_LOGI(MQTT_TAG, "Received attributes: %s", message.c_str());
-        topic_case = 1;
+    if (strncmp(topic, subTopic, strlen(subTopic) - 1) == 0) {
+        const char* requestID = topic + strlen(subTopic) - 1;
+        ESP_LOGI(MQTT_TAG, "Request ID: %s", requestID);
+
+        handle_mqtt_command(message.c_str(), requestID);
     } else {
         ESP_LOGE(MQTT_TAG, "Unknown topic: %s", topic);
-        // return;
-    }
-
-    switch (topic_case) {
-        case 0:
-            ESP_LOGI(MQTT_TAG, "Received command to turn pump relay ON");
-            break;
-        case 1:
-            ESP_LOGI(MQTT_TAG, "Received command to turn pump relay OFF");
-            break;
-        default:
-            ESP_LOGE(MQTT_TAG, "Unknown command received: %s", message.c_str());
-            // return;
-    }
-
-    std::string param_value = extractParamValue(message, "control_pump");
-    std::string fw_checksum = extractParamValue(message, "fw_checksum");
-    std::string fw_algorithm = extractParamValue(message, "fw_checksum_algorithm");
-    std::string fw_size = extractParamValue(message, "fw_size");
-    std::string fw_title = extractParamValue(message, "fw_title");
-    std::string fw_version = extractParamValue(message, "fw_version");
-
-    ESP_LOGI(MQTT_TAG, "control_pump: %s", param_value.c_str());
-    ESP_LOGI(MQTT_TAG, "fw_checksum: %s", fw_checksum.c_str());
-    ESP_LOGI(MQTT_TAG, "fw_algorithm: %s", fw_algorithm.c_str());
-    ESP_LOGI(MQTT_TAG, "fw_size: %s", fw_size.c_str());
-    ESP_LOGI(MQTT_TAG, "fw_title: %s", fw_title.c_str());
-    ESP_LOGI(MQTT_TAG, "fw_version: %s", fw_version.c_str());
-
-
-    if (fw_checksum.length() > 0 && strcmp(fw_algorithm.c_str(), "SHA256") == 0 && fw_size.length() > 0) {
-        ESP_LOGI(MQTT_TAG, "New firmware available for update.");
-        ESP_LOGI(MQTT_TAG, "Firmware checksum: %s", fw_checksum.c_str());
-
-        Serial.println("Có firmware mới. Trigger OTA update.");
-        strncpy(receivedFwTitle, fw_title.c_str(), sizeof(receivedFwTitle)-1);
-        strncpy(receivedFwVersion, fw_version.c_str(), sizeof(receivedFwVersion)-1);
-        otaUpdateTriggered = true;
-
-        // xTaskCreate(ota_update_task, "OTA Update Task", 8192, NULL, 4, NULL);
-    } else {
-        Serial.println("Không có bản cập nhật nào.");
-    }
-
-    if (strcmp(param_value.c_str(), "ON") == 0) {
-        ESP_LOGI(MQTT_TAG, "Turning pump relay ON");
-    
-        // Call the function to turn the relay ON
-        turnPumpRelay(true);    
-
-        if (client.connected())
-        {
-            char payload[64];
-            sprintf(payload, "{\"pumpStatus\": %d}", 1);
-            ESP_LOGI(MQTT_TAG, "Publishing payload: %s", payload);
-
-            if (client.publish(pubTopic, payload))
-            {
-                ESP_LOGI(MQTT_TAG, "Published successfully");
-            }
-            else
-            {
-                ESP_LOGE(MQTT_TAG, "Publish failed");
-            }
-        }
-            
-    }
-
-    else if (strcmp(param_value.c_str(), "OFF") == 0) {
-        ESP_LOGI(MQTT_TAG, "Turning pump relay OFF");
-        
-        // Call the function to turn the relay OFF
-        turnPumpRelay(false);
-        
-        if (client.connected())
-        {
-            char payload[64];
-            sprintf(payload, "{\"pumpStatus\": %d}", 0);
-            ESP_LOGI(MQTT_TAG, "Publishing payload: %s", payload);
-
-            if (client.publish(pubTopic, payload))
-            {
-                ESP_LOGI(MQTT_TAG, "Published successfully");
-            }
-            else
-            {
-                ESP_LOGE(MQTT_TAG, "Publish failed");
-            }
-        }
-
-    }
-
-    else {
-        ESP_LOGE(MQTT_TAG, "Invalid control pump command!!! Just: control_pump: ON/OFF\n");
+        return;
     }
 }
 
@@ -204,6 +165,8 @@ void mqttTask(void* parameter) {
 
     client.setServer(MQTT_BROKER, MQTT_PORT);
     client.setCallback(mqttCallback);
+    init_mqtt_token();
+    ESP_LOGI(MQTT_TAG, "MQTT Access Token: %s", MQTT_ACCESS_TOKEN);
 
     while (1) 
     {
@@ -235,7 +198,7 @@ void publisherTask(void* parameter) {
 
     while (1) 
     {
-        ulTaskNotifyTake(pdTRUE, (TickType_t)portMAX_DELAY);    // Wait for the notification from the timer callback
+        ulTaskNotifyTake(pdTRUE, (TickType_t)portMAX_DELAY);                               // Wait for the notification from the timer callback
         xEventGroupClearBits(mqtt_event_group, MQTT_TASK_DONE_BIT);
         
         if (client.connected()) {
@@ -246,14 +209,32 @@ void publisherTask(void* parameter) {
             // float orp_value = read_sensor_data(data_orp, sizeof(data_orp), "ORP");      // Read ORP sensor data (mV)          
 
             // Random sensor data for testing
-            float ph_value = random(0, 14);         // pH
-            float orp_value = random(-2000, 2000);  // mV
-            float ec_value = random(0, 2000);       // μS/cm
-            float tur_value = random(10, 4000);     // NTU
-            
-            char payload[256];
-            sprintf(payload, "{\"pH\": %.2f, \"ORP\": %.2f, \"EC\": %.2f, \"TUR\": %.2f}", ph_value, orp_value, ec_value, tur_value);
+            float ph_value = getRandomVal(ph_min, ph_max, gen);
+            float orp_value = getRandomVal(orp_min, orp_max, gen);
+            float ec_value = getRandomVal(ec_min, ec_max, gen);
+            float tur_value = getRandomVal(tur_min, tur_max, gen);
 
+            float predicted_ph_value = 0.0;
+            float predicted_orp_value = 0.0;
+            float predicted_ec_value = 0.0;
+            float predicted_tur_value = 0.0;
+
+            std::vector<float> prediction = processModel(ph_value, orp_value, ec_value, tur_value);
+            
+            if (prediction.size() == 4) {
+                predicted_ph_value = prediction[0];
+                predicted_orp_value = prediction[1];
+                predicted_ec_value = prediction[2];
+                predicted_tur_value = prediction[3];
+            }
+
+            char payload[256];
+            sprintf(payload, "{\"pH\": %.2f, \"predicted_pH\": %.2f, \"ORP\": %.2f, \"predicted_ORP\": %.2f, \"EC\": %.2f, \"predicted_EC\": %.2f, \"TUR\": %.2f, \"predicted_TUR\": %.2f, \"long\": %.6f, \"lat\": %.6f}", 
+                    ph_value, predicted_ph_value,
+                    orp_value, predicted_orp_value,
+                    ec_value, predicted_ec_value,
+                    tur_value, predicted_tur_value,
+                    longitude, latitude);
             ESP_LOGI(MQTT_TAG, "Publishing payload: %s", payload);
 
             // Publish data to ThingsBoard
@@ -272,229 +253,419 @@ void publisherTask(void* parameter) {
     }
 }
 
-// void checkPumpStatusTask(void* parameter)
-// {
-//     while (1)
-//     {
-//         vTaskDelay(5000 / portTICK_PERIOD_MS);
-//     }
-// }
-
-// void handle_pump_relay(char* cmd) {
-//     if (cmd == NULL) {
-//         ESP_LOGE(MQTT_TAG, "Invalid control pump command!!! Just: control_pump: ON/OFF");
-//         return;
-//     }
-//     char *relay_state = strtok(cmd, ":");
-//     if (relay_state == "ON") {
-//         ESP_LOGI(MQTT_TAG, "Turning pump relay ON");
-//         //TODO: Control relay, call the function to turn the relay OFF
-
-//     } 
-//     else if (relay_state == "OFF") {
-//         ESP_LOGI(MQTT_TAG, "Turning pump relay OFF");
-//         //TODO: Control relay, call the function to turn the relay ON
-//     }
-//     else {
-//         ESP_LOGE(MQTT_TAG, "Invalid control pump command!!! Just: control_pump: ON/OFF");
-//     } 
-// }
-
-// typedef void (*command_handler_t)(char *);
-// typedef struct
-// {
-//     const char *command;
-//     command_handler_t handler;
-// } command_t;
-// static const command_t command_table[] = {
-//     {"control_pump", handle_pump_relay},       // Command to turn the pump relay on/off: control/water_relay:1
-// };
-
-// void controlTask(void *arg)
-// {
-//     // control_queue = xQueueCreate(2, sizeof(char) * 200);
-//     // BaseType_t ret;
-//     char command[200];
-//     while (1)
-//     {
-//         // ret = xQueueReceive(control_queue, command, (TickType_t)500);
-//         // if (ret == pdTRUE)
-//         // {
-//         //     Serial.printf("Received command data from queue: %s\n", command);
-//         //     char *cmd = strtok(command, ":");
-//         //     char *args = strtok(NULL, "");
-
-//         //     // Search the command table for a matching command
-//         //     uint8_t command_found_flag = 0;
-//         //     for (size_t i = 0; i < sizeof(command_table) / sizeof(command_table[0]); i++)
-//         //     {
-//         //         if (strcmp(cmd, command_table[i].command) == 0)
-//         //         {
-//         //             command_table[i].handler(args);
-//         //             command_found_flag = 1;
-//         //             break;
-//         //         }
-//         //     }
-//         //     if (!command_found_flag)
-//         //     {
-//         //         Serial.printf("Unknown command: %s !!!\n", cmd);
-//         //     }
-//         // }
-
-//         if (xQueueReceive(control_queue, command, (TickType_t)500) == pdTRUE) {
-//             Serial.printf("Received command data from queue: %s\n", command);
-
-//             char *cmd = strtok(command, ":");
-//             char *args = strtok(NULL, "");
-
-//             if (cmd == NULL || args == NULL) {
-//                 Serial.println("Invalid command format.");
-//                 continue;
-//             }
-
-//             uint8_t command_found_flag = 0;
-//             for (size_t i = 0; i < sizeof(command_table) / sizeof(command_table[0]); i++) {
-//                 if (strcmp(cmd, command_table[i].command) == 0) {
-//                     command_table[i].handler(args);
-//                     command_found_flag = 1;
-//                     break;
-//                 }
-//             }
-
-//             if (!command_found_flag) {
-//                 Serial.printf("Unknown command: %s !!!\n", cmd);
-//             }
-//         }
-
-//     }
-// }
-
-std::string extractParamValue(const std::string& message, const std::string& key) {
-    std::string keyPattern = "\"" + key + "\":";
-    size_t keyStart = message.find(keyPattern);
-    if (keyStart == std::string::npos) {
-        return "";
-    }
-
-    size_t valueStart = keyStart + keyPattern.length();
-    while (valueStart < message.size() && isspace(message[valueStart])) {
-        valueStart++;
-    }
-
-    if (valueStart >= message.size()) {
-        return "";
-    }
-
-    // Xử lý giá trị
-    if (message[valueStart] == '"') {  // Giá trị là chuỗi
-        size_t valueEnd = message.find('"', valueStart + 1);
-        if (valueEnd == std::string::npos) {
-            return "";
-        }
-        return message.substr(valueStart + 1, valueEnd - valueStart - 1);
-    } else { 
-        size_t valueEnd = message.find_first_of(",}", valueStart);
-        if (valueEnd == std::string::npos) {
-            return "";
-        }
+void publishExecutedCronTask(void* parameter) {
+    // Task that waits for notifications from execute_cronjob
+    ESP_LOGI(MQTT_TAG, "Cron job publisher task started");
+    
+    while (true) {
+        // Wait for notification from execute_cronjob
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         
-        while (valueEnd > valueStart && isspace(message[valueEnd - 1])) {
-            valueEnd--;
+        if (executed_cronjob && client.connected()) {
+            // Create payload with executed cron job information including the cron expression and executed status
+            char payload[128];
+            snprintf(payload, sizeof(payload), 
+                    "{\"executed_cronjob\": {\"id\": %u, \"cron\": \"%s\", \"executed\": true}, \"pumpStatus\": %d}",
+                    id_executed_cronjob, executed_cron_expr, pumpStatus_executed_cronjob);
+                    
+            // Publish to telemetry topic
+            if (client.publish(pubTopic, payload)) {
+                ESP_LOGI(MQTT_TAG, "Published executed cron job: ID %u, Cron: %s; Pump Status: %s",
+                        id_executed_cronjob, executed_cron_expr, pumpStatus_executed_cronjob ? "ON" : "OFF");
+            } else {
+                ESP_LOGE(MQTT_TAG, "Failed to publish executed cron job");
+            }
+            
+            // Reset the flag
+            executed_cronjob = false;
+        } else if (!client.connected()) {
+            ESP_LOGW(MQTT_TAG, "MQTT client not connected. Cannot publish executed cron job.");
         }
-        return message.substr(valueStart, valueEnd - valueStart);
     }
 }
 
-// // std::string fw_url = "https://demo.thingsboard.io/api/v1", fw_checksum, fw_algorithm, fw_title, fw_version;
-// // int fw_size = 0;
+void checkPumpStatusTask(void* parameter) {
+    bool success = false;
 
-// void getOTAURLUpdate(const char* access_token, const char* fw_title, const char* fw_version) {
-//     std::string otaURL = "https://demo.thingsboard.io/api/v1/";
-//     otaURL += access_token;
-//     otaURL += "/firmware?title=";
-//     otaURL += fw_title;
-//     otaURL += "&version=";
+    while (1) {
+        if (client.connected()) {
+            // int pumpStatus = readPumpStatus() ? 1 : 0;
+            char payload[128];
+            snprintf(payload, sizeof(payload), "{\"current_fw_version\": %s, \"monitoring_time\": %lld}", FIRMWARE_VERSION, measurement_time);
+            client.publish(pubTopic, payload);
+            // ESP_LOGI(MQTT_TAG, "Pump status: %s", pumpStatus ? "ON" : "OFF");
+            ESP_LOGI(MQTT_TAG, "Current firmware version: %s", FIRMWARE_VERSION);
+            success = true; 
+        } else {
+            ESP_LOGW(MQTT_TAG, "MQTT client not connected. Cannot publish pump status.");
+        }
+        
+        if (success) vTaskDelete(NULL); // Delete the task after publishing
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+}
+
+static void handle_pump_relay(char *cmd, ControlDef *def) {
+    if (cmd == NULL) {
+        ESP_LOGE(MQTT_TAG, "Invalid control pump command! Just: control_pump: ON/OFF");
+        return;
+    }
+    
+    bool success = false;
+    bool pumpStatus = false;
+    
+    if (strcmp(cmd, "ON") == 0) {
+        ESP_LOGI(MQTT_TAG, "Turning pump relay ON");
+        turnPumpRelay(true);
+        success = true;
+        pumpStatus = true;
+    } else if (strcmp(cmd, "OFF") == 0) {
+        ESP_LOGI(MQTT_TAG, "Turning pump relay OFF");
+        turnPumpRelay(false);
+        success = true;
+        pumpStatus = false;
+    } else {
+        ESP_LOGE(MQTT_TAG, "Invalid control pump command! Just: control_pump: ON/OFF");
+        return;
+    }
+    
+    // Publish pump status based on the command if control was successful
+    if (success && client.connected()) {
+        char payload[128];
+        snprintf(payload, sizeof(payload), "{\"pumpStatus\": %d}", pumpStatus ? 1 : 0);
+        
+        if (client.publish(pubTopic, payload)) {
+            ESP_LOGI(MQTT_TAG, "Published pump status: %s", pumpStatus ? "ON" : "OFF");
+        } else {
+            ESP_LOGE(MQTT_TAG, "Failed to publish pump status");
+        }
+    }
+}
+
+static void handle_change_wifi(char *cmd, ControlDef *def) {
+    if (cmd == NULL) {
+        ESP_LOGE(MQTT_TAG, "Invalid change Wi-Fi command! Use: change_wifi:SSID:PASSWORD");
+        return;
+    }
+
+    char *ssid = strtok(cmd, ":");
+    char *password = strtok(NULL, "");
+
+    if (ssid == NULL || password == NULL) {
+        ESP_LOGE(MQTT_TAG, "Invalid change Wi-Fi command! Use: change_wifi:SSID:PASSWORD");
+        return;
+    }
+
+    ESP_LOGI(MQTT_TAG, "Changing Wi-Fi to SSID: %s, Password: %s", ssid, password);
+
+    // Save new Wi-Fi credentials to NVS
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open("wifi_stored", NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(MQTT_TAG, "Error opening NVS handle: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = nvs_set_str(nvs_handle, "ssid", ssid);
+    if (err != ESP_OK) {
+        ESP_LOGE(MQTT_TAG, "Error saving SSID to NVS: %s", esp_err_to_name(err));
+        nvs_close(nvs_handle);
+        return;
+    }
+
+    err = nvs_set_str(nvs_handle, "password", password);
+    if (err != ESP_OK) {
+        ESP_LOGE(MQTT_TAG, "Error saving password to NVS: %s", esp_err_to_name(err));
+        nvs_close(nvs_handle);
+        return;
+    }
+
+    err = nvs_commit(nvs_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(MQTT_TAG, "Error committing changes to NVS: %s", esp_err_to_name(err));
+    } else {
+        ESP_LOGI(MQTT_TAG, "Wi-Fi credentials saved to NVS successfully");
+    }
+
+    nvs_close(nvs_handle);
+
+    // Disconnect and reconnect to the new Wi-Fi
+    WiFi.disconnect();
+    WiFi.begin(ssid, password);
+
+    ESP_LOGI(MQTT_TAG, "Connecting to new Wi-Fi...");
+    for (int i = 0; i < 10; i++) {
+        if (WiFi.status() == WL_CONNECTED) {
+            ESP_LOGI(MQTT_TAG, "Connected to new Wi-Fi: SSID=%s", ssid);
+            return;
+        }
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+
+    ESP_LOGE(MQTT_TAG, "Failed to connect to new Wi-Fi: SSID=%s", ssid);
+}
+
+static void handle_measurement_time(char *cmd, ControlDef *def) {
+    uint64_t new_measurement_time = (uint64_t)atol(cmd);
+
+    if (new_measurement_time < 10000) {
+        ESP_LOGE(MQTT_TAG, "Invalid measurement time! Must be at least 10 seconds.");
+        new_measurement_time = 10000; // Set to minimum value
+    }
+
+    stop_esp_timer();
+    measurement_time = new_measurement_time;  // Update measurement time
+    save_measurement_time_to_nvs(measurement_time);  // Save to NVS
+
+    ESP_LOGI(MQTT_TAG, "Measurement time changed to: %lld seconds", measurement_time / 1000);
+    start_esp_timer();
+
+    if (client.connected()) {
+        char payload[128];
+        snprintf(payload, sizeof(payload), "{\"monitoring_time\": %lld}", measurement_time);
+        
+        if (client.publish(pubTopic, payload)) {
+            ESP_LOGI(MQTT_TAG, "Published measurement time: %lld", measurement_time / 1000);
+        } else {
+            ESP_LOGE(MQTT_TAG, "Failed to publish measurement time!");
+        }
+    }
+} 
+
+// static void handle_factory_reset(char *cmd, ControlDef *def) {
+//     ESP_LOGI(MQTT_TAG, "Factory reset command received");
+    
+//     // Notify the user before reset
+//     if (client.connected()) {
+//         const char *reset_payload = "{\"status\": \"Factory reset initiated\", \"message\": \"Device will reboot to factory partition\"}";
+//         client.publish(pubTopic, reset_payload);
+//         // Give time for the MQTT message to be sent before reset
+//         delay(1000);
+//     }
+    
+//     // Call the rollback function from OTA module
+//     rollbackToFactory();
 // }
 
-// // String extractValue(String json, String key) {
-// //     int startIndex = json.indexOf("\"" + key + "\":\"");
-// //     if (startIndex == -1) {
-// //         return "";
-// //     }
+typedef void (*command_handler_t)(char *cmd, ControlDef *def);
+typedef struct
+{
+    const char *command;
+    command_handler_t handler;
+} command_t;
 
-// //     startIndex = json.indexOf("\"", startIndex + key.length() + 3) + 1;
-// //     int endIndex = json.indexOf("\"", startIndex);
-// //     return json.substring(startIndex, endIndex);
-// // }
+static const command_t command_table[] = {
+    {"pump_relay", handle_pump_relay},       // Command to turn the pump relay on/off: control/pump_relay:ON/OFF
+    {"change_wifi", handle_change_wifi},        // Command to change WiFi: control/change_wifi:SSID:PASSWORD
+    {"measurement_time", handle_measurement_time},
+    // {"factory_reset", handle_factory_reset},    // Command to trigger factory reset: control/factory_reset:confirm
+};
 
-// // void ota_update_task(void *pvParameters) {
-// //     Serial.println("Starting OTA update task...");
+void controlTask(void *parameter)
+{
+    ControlDef *def = (ControlDef *)parameter;
+    BaseType_t ret;
+    char command[200];
+    while (1)
+    {
+        ret = xQueueReceive(control_queue, command, (TickType_t)500); // Wait for a command from the queue
+        if (ret == pdTRUE)
+        {
+            ESP_LOGI(MQTT_TAG, "Received command data from queue: %s", command);       
+            char *cmd_name = strtok(command, ":");
+            char *cmd_value = strtok(NULL, "");
+            
+            uint8_t command_found_flag = 0;
+            for (size_t i = 0; i < sizeof(command_table) / sizeof(command_table[0]); i++) {
+                if (strcmp(cmd_name, command_table[i].command) == 0) {
+                    command_table[i].handler(cmd_value, def);
+                    command_found_flag = 1;
+                    break;
+                }
+            }
+            if (!command_found_flag) {
+                ESP_LOGE(MQTT_TAG, "Unknown command: %s", cmd_name);
+            }
+        }
+    }
+}
 
-// //     // HTTPClient http;
-// //     // http.begin(fw_url);
-// //     int httpCode = http.GET();
-// //     if (httpCode != HTTP_CODE_OK) {
-// //         Serial.printf("HTTP GET failed, error: %d\n", httpCode);
-// //         http.end();
-// //         vTaskDelete(NULL);
-// //     }
+// Handle OTA update commands
+bool handle_ota_command(cJSON *params) {
+    const char *ota_key = "ota/fw_title";
+    cJSON *ota_item = cJSON_GetObjectItem(params, ota_key);
+    
+    if (!ota_item) {
+        return false;
+    }
+    
+    // Extract firmware title from the JSON value
+    if (cJSON_IsString(ota_item)) {
+        strlcpy(receivedFwTitle, ota_item->valuestring, sizeof(receivedFwTitle));
+    } else {
+        ESP_LOGE(MQTT_TAG, "Invalid firmware title format");
+        return false;
+    }
 
-// //     int contentLength = http.getSize();
-// //     WiFiClient *stream = http.getStreamPtr();
+    cJSON *fw_version_item = cJSON_GetObjectItem(params, "fw_version");
+    if (fw_version_item && cJSON_IsString(fw_version_item)) {
+        strlcpy(receivedFwVersion, fw_version_item->valuestring, sizeof(receivedFwVersion));
+        ESP_LOGI(MQTT_TAG, "Received Firmware title: %s, version: %s", receivedFwTitle, receivedFwVersion);
+        otaUpdateTriggered = true;
 
-// //     if (contentLength != fw_size) {
-// //         Serial.printf("Content length mismatch: expected %d, got %d\n", fw_size, contentLength);
-// //         http.end();
-// //         vTaskDelete(NULL);
-// //     }
+        if (otaUpdateTask_handle != NULL) {
+            xTaskNotifyGive(otaUpdateTask_handle);
+        } else {
+            ESP_LOGE(MQTT_TAG, "OTA update task handle is NULL");
+        }
+        return true;
+    } else {
+        ESP_LOGE(MQTT_TAG, "Invalid OTA command: missing or invalid fw_version");
+        return false;
+    }
+}
 
-// //     if (!Update.begin(contentLength)) {
-// //         Serial.println("Not enough space to begin OTA update");
-// //         http.end();
-// //         vTaskDelete(NULL);
-// //     }
+// Handle schedule commands
+bool handle_schedule_command(cJSON *params) {
+    const char *schedule_actions[] = {"schedule/add", "schedule/edit", "schedule/delete"};
+    const char *current_action = NULL;
+    cJSON *schedule_item = NULL;
 
-// //     uint8_t sha256_calc[32];
-// //     mbedtls_md_context_t ctx;
-// //     mbedtls_md_type_t md_type = MBEDTLS_MD_SHA256;
-// //     mbedtls_md_init(&ctx);
-// //     mbedtls_md_setup(&ctx, mbedtls_md_info_from_type(md_type), 0);
-// //     mbedtls_md_starts(&ctx);
+    // Find which schedule action is present in the command
+    for (int i = 0; i < sizeof(schedule_actions) / sizeof(schedule_actions[0]); i++) {
+        schedule_item = cJSON_GetObjectItem(params, schedule_actions[i]);
+        if (schedule_item) {
+            current_action = schedule_actions[i];
+            break;
+        }
+    }
 
-// //     size_t written = 0;
-// //     while (written < contentLength) {
-// //         uint8_t buffer[512];
-// //         int bytesRead = stream->readBytes(buffer, sizeof(buffer));
-// //         if (bytesRead > 0) {
-// //             Update.write(buffer, bytesRead);
-// //             mbedtls_md_update(&ctx, buffer, bytesRead);
-// //             written += bytesRead;
-// //         }
-// //     }
+    if (!current_action || !schedule_item) {
+        return false; // No schedule command found
+    }
 
-// //     mbedtls_md_finish(&ctx, sha256_calc);
-// //     mbedtls_md_free(&ctx);
+    CronJob cronjob = {0};
+    char action[32] = {0};
 
-// //     char sha256_str[65];
-// //     for (int i = 0; i < 32; i++) {
-// //         sprintf(&sha256_str[i * 2], "%02x", sha256_calc[i]);
-// //     }
-// //     sha256_str[64] = '\0';
+    // Extract action type (add, edit, delete)
+    sscanf(current_action, "schedule/%31s", action);
+    strlcpy(cronjob.action, action, sizeof(cronjob.action));
 
-// //     if (String(sha256_str) != fw_checksum) {
-// //         Serial.printf("SHA256 checksum mismatch: expected %s, got %s\n", fw_checksum.c_str(), sha256_str);
-// //         Update.end();
-// //         http.end();
-// //         vTaskDelete(NULL);
-// //     }
+    // Get target relay
+    if (cJSON_IsString(schedule_item)) {
+        strlcpy(cronjob.relay, schedule_item->valuestring, sizeof(cronjob.relay));
+    } else {
+        ESP_LOGE(MQTT_TAG, "Invalid target device for %s", current_action);
+        return false;
+    }
 
-// //     if (Update.end()) {
-// //         Serial.println("OTA update successful, restarting...");
-// //         esp_restart();
-// //     } else {
-// //         Serial.println("OTA update failed");
-// //     }
+    // Get job ID
+    cJSON *id_item = cJSON_GetObjectItem(params, "id");
+    if (id_item && cJSON_IsNumber(id_item)) {
+        cronjob.id = id_item->valueint;
+    } else {
+        ESP_LOGE(MQTT_TAG, "Invalid ID for %s", current_action);
+        return false;
+    }
 
-// //     http.end();
-// //     vTaskDelete(NULL);
-// // }
+    // For add/edit actions, get cron expression and state
+    if (strcmp(action, "add") == 0 || strcmp(action, "edit") == 0) {
+        cJSON *cron_item = cJSON_GetObjectItem(params, "cron");
+        if (cron_item && cJSON_IsString(cron_item)) {
+            strlcpy(cronjob.cron, cron_item->valuestring, sizeof(cronjob.cron));
+        } else {
+            ESP_LOGE(MQTT_TAG, "Invalid cron expression for %s", current_action);
+            return false;
+        }
+
+        cJSON *state_item = cJSON_GetObjectItem(params, "state");
+        cronjob.state = state_item ? cJSON_IsTrue(state_item) : false;
+
+        ESP_LOGI(MQTT_TAG, "Action %s: relay=%s, id=%u, cron=%s, state=%s", 
+                 current_action, cronjob.relay, cronjob.id, cronjob.cron, 
+                 cronjob.state ? "On" : "Off");
+        save_cronjob_to_nvs(&cronjob);
+    } 
+    // For delete action
+    else if (strcmp(action, "delete") == 0) {
+        ESP_LOGI(MQTT_TAG, "Deleting cron job: relay=%s, id=%d", cronjob.relay, cronjob.id);
+        delete_cronjob_from_nvs(cronjob.id);
+    }
+    
+    return true;
+}
+
+// Handle other command types
+void handle_other_commands(cJSON *params) {
+    cJSON *item = params->child;
+    while (item) {
+        if (cJSON_IsString(item)) {
+            char prefix[64] = {0}, command[64] = {0};
+
+            if (sscanf(item->string, "%63[^/]/%63s", prefix, command) == 2) {
+                QueueHandle_t target_queue = NULL;
+    
+                for (size_t i = 0; i < sizeof(queue_table) / sizeof(queue_table[0]); i++) {
+                    if (strcmp(prefix, queue_table[i].prefix) == 0) {
+                        target_queue = *queue_table[i].queue;
+                        break;
+                    }
+                }
+    
+                if (target_queue != NULL) {
+                    char msg[128];
+                    snprintf(msg, sizeof(msg), "%s:%s", command, item->valuestring);
+                    xQueueSend(target_queue, msg, (TickType_t)100);
+                    ESP_LOGI(MQTT_TAG, "Pushed command '%s' to queue %s", msg, prefix);
+                } else {
+                    ESP_LOGE(MQTT_TAG, "No queue mapped for prefix: %s", prefix);
+                }
+            }
+        }
+
+        item = item->next;
+    }
+}
+
+void handle_mqtt_command(const char *json_str, const char *requestID) {
+    cJSON *root = cJSON_Parse(json_str);
+    if (!root) {
+        ESP_LOGE(MQTT_TAG, "Failed to parse JSON");
+        return;
+    }
+
+    cJSON *params = cJSON_GetObjectItem(root, "params");
+    if (!params || !cJSON_IsObject(params)) {
+        ESP_LOGE(MQTT_TAG, "Invalid params in JSON");
+        cJSON_Delete(root);
+        return;
+    }
+
+    bool command_handled = false;
+
+    // Handle OTA updates
+    if (handle_ota_command(params)) {
+        command_handled = true;
+    }
+    // Handle schedule commands
+    else if (handle_schedule_command(params)) {
+        command_handled = true;
+    }
+    // Handle other commands
+    else {
+        handle_other_commands(params);
+        command_handled = true;
+    }
+
+    cJSON_Delete(root);
+    
+    // Send response
+    if (command_handled) {
+        char response_topic[128];
+        snprintf(response_topic, sizeof(response_topic), "v1/devices/me/rpc/response/%s", requestID);
+        
+        const char *response_payload = "{\"status\": \"success\"}";
+        client.publish(response_topic, response_payload);
+        ESP_LOGI(MQTT_TAG, "Published response to topic: %s", response_topic);
+    }
+}

@@ -1,0 +1,306 @@
+"use client"
+
+import * as React from "react"
+import {
+    AudioWaveform,
+    Bot,
+    Command,
+    GalleryVerticalEnd,
+    Microchip,
+    Bell,
+    CloudDownload
+} from "lucide-react"
+
+import {
+    Sidebar,
+    SidebarContent,
+    SidebarFooter,
+    SidebarHeader,
+    SidebarRail,
+} from "@/components/ui/sidebar"
+import { NavMain } from "./NavMain"
+import { NavProjects } from "./NavProject"
+import { NavUser } from "./NavUser"
+import { TeamSwitcher } from "./TeamSwitcher"
+import { DeviceModal } from "../modals/DeviceModal"
+import { DeviceDrawer } from "../drawers/DeviceDrawer"
+import { NotificationModal } from "../modals/NotificationModal"
+import { useMultiTelemetry } from "../context/MultiTelemetryProvider"
+import { addNotification, getRanges } from "@/actions"
+import { toast } from "@/hooks/use-toast"
+import { OTAList } from "../modals/OTAList"
+import { NotificationDrawer } from "../drawers/NotificationDrawer"
+
+// This is sample data.
+const data = {
+    user: {
+        name: "shadcn",
+        email: "m@example.com",
+        avatar: "/avatars/shadcn.jpg",
+    },
+    teams: [
+        {
+            name: "Acme Inc",
+            logo: GalleryVerticalEnd,
+            plan: "Enterprise",
+        },
+        {
+            name: "Acme Corp.",
+            logo: AudioWaveform,
+            plan: "Startup",
+        },
+        {
+            name: "Evil Corp.",
+            logo: Command,
+            plan: "Free",
+        },
+    ],
+    navMain: [
+        {
+            title: "Devices",
+            url: "#",
+            icon: Microchip,
+            items: [
+                {
+                    title: "Add new device",
+                    url: "#",
+                    component: <>
+                        <div className="hidden md:block">
+                            <DeviceModal />
+                        </div>
+                        <div className="md:hidden">
+                            <DeviceDrawer />
+                        </div>
+                    </>
+                },
+            ],
+        },
+        {
+            title: "Notifications",
+            url: "#",
+            icon: Bell,
+            items: [
+                {
+                    title: "Notifications center",
+                    url: "#",
+                    component: <>
+                        <div className="hidden md:block">
+                            <NotificationModal />
+                        </div>
+                        <div className="md:hidden">
+                            <NotificationDrawer />
+                        </div>
+                    </>
+                },
+            ],
+        },
+        {
+            title: "OTA Update",
+            url: "#",
+            icon: CloudDownload,
+            items: [
+                {
+                    title: "Software Update",
+                    url: '#',
+                    component: <OTAList />
+                },
+            ],
+        },
+        {
+            title: "Chatbot",
+            url: "#",
+            icon: Bot,
+            items: [
+                {
+                    title: "General",
+                    url: "#",
+                },
+                {
+                    title: "Team",
+                    url: "#",
+                },
+                {
+                    title: "Billing",
+                    url: "#",
+                },
+                {
+                    title: "Limits",
+                    url: "#",
+                },
+            ],
+        },
+    ],
+}
+
+const fireAlert = async (value: number, minValue: number, maxValue: number, deviceName: string, deviceId: string, sensor: string) => {
+    const data: any = {
+        deviceId,
+        sensor,
+        value,
+        deviceName
+    }
+    if (value < minValue) {
+        data['minValue'] = minValue
+        data['condition'] = 'lower'
+        data['content'] = `Your pH value is less than min value (${value} < ${minValue})`
+        await addNotification(data)
+        toast({
+            variant: 'destructive',
+            title: `⚠️Uh oh! pH value is out of range on ${deviceName}`,
+            description: `Your pH value is less than min value (${value} < ${minValue})`,
+        })
+    }
+    else if (value > maxValue) {
+        data['maxValue'] = maxValue
+        data['condition'] = 'higher'
+        data['content'] = `Your pH value is more than max value (${value} > ${maxValue})`
+        await addNotification(data)
+        toast({
+            variant: 'destructive',
+            title: `⚠️ pH value is out of range on ${deviceName}`,
+            description: `Your pH value is more than max value (${value} > ${maxValue})`,
+        })
+    }
+}
+
+export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+
+    const telemetry = useMultiTelemetry()
+
+
+    React.useEffect(() => {
+        let cancelled = false
+
+        async function checkAlerts() {
+            // 2) Fetch 4 bộ range song song
+            const [phRes, orpRes, turRes, ecRes] = await Promise.all([
+                getRanges('pH'),
+                getRanges('ORP'),
+                getRanges('TUR'),
+                getRanges('EC'),
+            ])
+            if (cancelled) return
+
+            const rangesPH = phRes.data   // Array<{ deviceId, sensor, minValue, maxValue }>
+            const rangesORP = orpRes.data
+            const rangesTUR = turRes.data
+            const rangesEC = ecRes.data
+
+            // 3) Duyệt từng device trong telemetry
+            telemetry.forEach((dev) => {
+                const id = dev.deviceId
+                const name = dev.deviceName
+                // helper lấy value cuối cùng
+                const last = (arr: number[]) =>
+                    arr.length ? arr[arr.length - 1] : undefined
+
+                // ===== pH =====
+                const vPH = last(dev.pH)
+                if (vPH !== undefined) {
+                    const r = rangesPH?.find((x) => x.deviceId === id)
+                    if (r) {
+                        // if (vPH < r.minValue) {
+                        //     toast({
+                        //         variant: 'destructive',
+                        //         title: `⚠️Uh oh! pH value is out of range on ${name}`,
+                        //         description: `Your pH value is less than min value (${vPH} < ${r.minValue})`,
+                        //     })
+                        // } else if (vPH > r.maxValue) {
+                        //     toast({
+                        //         variant: 'destructive',
+                        //         title: `⚠️ pH value is out of range on ${name}`,
+                        //         description: `Your pH value is more than min value (${vPH} > ${r.maxValue})`,
+                        //     })
+                        // }
+                        fireAlert(vPH, r.minValue, r.maxValue, name, id, 'pH')
+                    }
+                }
+
+                // ===== ORP =====
+                const vORP = last(dev.ORP)
+                if (vORP !== undefined) {
+                    const r = rangesORP?.find((x) => x.deviceId === id)
+                    if (r) {
+                        // if (vORP < r.minValue) {
+                        //     toast({
+                        //         variant: 'destructive',
+                        //         title: `⚠️ ORP quá thấp trên ${name}`,
+                        //         description: `${vORP} < ${r.minValue}`,
+                        //     })
+                        // } else if (vORP > r.maxValue) {
+                        //     toast({
+                        //         variant: 'destructive',
+                        //         title: `⚠️ ORP quá cao trên ${name}`,
+                        //         description: `${vORP} > ${r.maxValue}`,
+                        //     })
+                        // }
+                        fireAlert(vORP, r.minValue, r.maxValue, name, id, 'ORP')
+                    }
+                }
+
+                // ===== TUR =====
+                const vTUR = last(dev.TUR)
+                if (vTUR !== undefined) {
+                    const r = rangesTUR?.find((x) => x.deviceId === id)
+                    if (r) {
+                        // if (vTUR < r.minValue) {
+                        //     toast({
+                        //         variant: 'destructive',
+                        //         title: `⚠️ TUR quá thấp trên ${name}`,
+                        //         description: `${vTUR} < ${r.minValue}`,
+                        //     })
+                        // } else if (vTUR > r.maxValue) {
+                        //     toast({
+                        //         variant: 'destructive',
+                        //         title: `⚠️ TUR quá cao trên ${name}`,
+                        //         description: `${vTUR} > ${r.maxValue}`,
+                        //     })
+                        // }
+                        fireAlert(vTUR, r.minValue, r.maxValue, name, id, 'TUR')
+                    }
+                }
+
+                // ===== EC =====
+                const vEC = last(dev.EC)
+                if (vEC !== undefined) {
+                    const r = rangesEC?.find((x) => x.deviceId === id)
+                    if (r) {
+                        // if (vEC < r.minValue) {
+                        //     toast({
+                        //         variant: 'destructive',
+                        //         title: `⚠️ EC quá thấp trên ${name}`,
+                        //         description: `${vEC} < ${r.minValue}`,
+                        //     })
+                        // } else if (vEC > r.maxValue) {
+                        //     toast({
+                        //         variant: 'destructive',
+                        //         title: `⚠️ EC quá cao trên ${name}`,
+                        //         description: `${vEC} > ${r.maxValue}`,
+                        //     })
+                        // }
+                        fireAlert(vEC, r.minValue, r.maxValue, name, id, 'EC')
+                    }
+                }
+            })
+        }
+
+        checkAlerts()
+        return () => { cancelled = true }
+    }, [telemetry])
+
+    return (
+        <Sidebar collapsible="icon" {...props}>
+            <SidebarHeader>
+                <TeamSwitcher teams={data.teams} />
+            </SidebarHeader>
+            <SidebarContent>
+                <NavMain items={data.navMain} />
+                <NavProjects />
+            </SidebarContent>
+            <SidebarFooter>
+                <NavUser user={data.user} />
+            </SidebarFooter>
+            <SidebarRail />
+        </Sidebar>
+    )
+}

@@ -17,32 +17,107 @@ import { Swiper, SwiperSlide } from 'swiper/react'
 import 'swiper/css'
 import 'swiper/css/navigation'
 import 'swiper/css/pagination'
-import { getTelemetryTb, loginTb, sendDataTb } from '@/actions'
-import { readSetting } from '@/actions'
-import { useToast } from '@/hooks/use-toast'
-import { Calendar } from "@/components/ui/calendar"
-import { TaskModal } from './modals/TaskModal'
+import { addNotification, getDeviceInfo, getRanges, getTasks, getTelemetryTb, sendDataTb, updateTask, updateTaskStatus } from '@/actions'
+import { toast, useToast } from '@/hooks/use-toast'
 import { createClient } from '@supabase/supabase-js'
-import { before } from 'lodash'
+import { useTelemetry } from './context/TelemetryProvider'
+import { useGetUserSB } from '@/hooks/useGetUserSB'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-export function Footer() {
-  const [pH, setPH] = useState(0)
-  const [ORP, setORP] = useState(0)
-  const [TUR, setTUR] = useState(0)
-  const [EC, setEC] = useState(0)
+type ExecutedCronjob = {
+  id: string,
+  cron: string,
+  executed: boolean
+}
+
+const fireAlert = async (value: number, minValue: number, maxValue: number, deviceName: string, deviceId: string, sensor: string) => {
+  // console.log('value >>>', value)
+  // console.log('min value >>>', rangeObj.minValue)
+
+  // console.log('max value >>>', rangeObj.maxValue)
+  value = Number(value).toFixed(2) as number
+  const data: any = {
+    deviceId,
+    sensor,
+    value,
+    deviceName
+  }
+
+  if (value < minValue) {
+    data['minValue'] = minValue
+    data['condition'] = 'lower'
+    data['content'] = `Your predicted_${sensor} value is less than min value (${value} < ${minValue})`
+    await addNotification(data)
+    toast({
+      variant: "destructive",
+      title: `⚠️ Uh oh! predicted_${sensor} value is out of range`,
+      description: `Your predicted_${sensor} value is less than min value (${value} < ${minValue})`
+    })
+  } else if (value > maxValue) {
+    data['maxValue'] = maxValue
+    data['condition'] = 'higher'
+    data['content'] = `Your predicted_${sensor} value is more than max value (${value} > ${maxValue})`
+    await addNotification(data)
+    toast({
+      variant: "destructive",
+      title: `⚠️ Uh oh! predicted_${sensor} value is out of range`,
+      description: `Your predicted_${sensor} value is more than max value (${value} > ${maxValue})`
+    })
+  }
+}
+
+export function Footer({ deviceId }: { deviceId: string }) {
+  // const [pH, setPH] = useState<SensorData[]>([])
+  // const [ORP, setORP] = useState<SensorData[]>([])
+  // const [TUR, setTUR] = useState<SensorData[]>([])
+  // const [EC, setEC] = useState<SensorData[]>([])
+
+  const { pH, ORP, EC, TUR, predictedPH, predictedORP, predictedTUR, predictedEC, executed_cronjob } = useTelemetry()
+
+  const token = global?.window?.localStorage.getItem('token') ?? ''
+  const res = useGetUserSB()
+  const userId = res.userInfo?.session.user.id
 
   const [switchState, setSwitchState] = useState<boolean>(false)
   const prevSwitchState = useRef<boolean>()
 
-  const { toast } = useToast()
   const handleSwitch = (checked: boolean) => {
     prevSwitchState.current = switchState
     setSwitchState(checked)
   }
+
+  useEffect(() => {
+    const handleAlert = async () => {
+
+      const { name } = await getDeviceInfo(deviceId, token)
+
+      const { data: dataPH } = await getRanges('pH', deviceId)
+      const { data: dataTUR } = await getRanges('TUR', deviceId)
+      const { data: dataORP } = await getRanges('ORP', deviceId)
+      const { data: dataEC } = await getRanges('EC', deviceId)
+
+      if (dataPH?.length > 0) {
+        fireAlert(predictedPH.at(predictedPH.length - 1)?.value as number, dataPH?.[0].minValue, dataPH?.[0].maxValue, name, deviceId, 'pH')
+      }
+
+      if (dataORP?.length > 0) {
+        fireAlert(predictedORP.at(predictedORP.length - 1)?.value as number, dataORP?.[0].minValue, dataORP?.[0].maxValue, name, deviceId, 'ORP')
+      }
+
+      if (dataTUR?.length > 0) {
+        fireAlert(predictedTUR.at(predictedTUR.length - 1)?.value as number, dataTUR?.[0].minValue, dataTUR?.[0].maxValue, name, deviceId, 'TUR')
+      }
+
+      if (dataEC?.length > 0) {
+        fireAlert(predictedEC.at(predictedEC.length - 1)?.value as number, dataEC?.[0].minValue, dataEC?.[0].maxValue, name, deviceId, 'EC')
+      }
+    }
+
+    handleAlert()
+  }, [pH, ORP, EC, TUR])
 
   supabase
     .channel('custom-channel')
@@ -51,11 +126,11 @@ export function Footer() {
       { event: 'UPDATE', schema: 'public', table: 'tasks' },
       (payload) => {
         if (payload.new.status === 'success') {
-          if (payload.new.trigger_type === 'true') {
-            handleSwitch(true)
-          } else {
-            handleSwitch(false)
-          }
+          // if (payload.new.trigger_type === 'true') {
+          //   handleSwitch(true)
+          // } else {
+          //   handleSwitch(false)
+          // }
 
           toast({
             title: "You submitted the following values:",
@@ -70,103 +145,46 @@ export function Footer() {
     )
     .subscribe();
 
-  const [date, setDate] = useState<Date | undefined>(undefined)
-  const [isOpen, isSetOpen] = useState(false)
-  const handlePickDate = (newSelected: Date | undefined) => {
-    isSetOpen(true)
-    setDate(newSelected)
-  }
-
   useEffect(() => {
-    const fetchLoginData = async () => {
-
-      try {
-        const login = await loginTb()
-        const setting: any = await readSetting()
-
-        if (setting && setting.data && setting.data.length > 0) {
-          const token = login.token as string
-          localStorage.setItem('token', token)
-          let { entityType, entityId } = setting.data[0]
-
-          const webSocket = new WebSocket(
-            process.env.NEXT_PUBLIC_TB_WS_URL || ''
-          )
-
-          webSocket.onopen = () => {
-            const object = {
-              authCmd: {
-                cmdId: 0,
-                token: token
-              },
-              cmds: [
-                {
-                  entityType: entityType,
-                  entityId: entityId,
-                  scope: 'LATEST_TELEMETRY',
-                  cmdId: 10,
-                  type: 'TIMESERIES'
-                }
-              ]
-            }
-            const data = JSON.stringify(object)
-            webSocket.send(data)
-          }
-
-          webSocket.onmessage = (event) => {
-            const receivedData = JSON.parse(event.data)
-            const { subscriptionId, data } = receivedData
-            if (data?.pH?.length > 0) {
-              setPH(data.pH[0][1])
-            }
-            if (data?.ORP?.length > 0) {
-              setORP(data.ORP[0][1])
-            }
-            if (data?.TUR?.length > 0) {
-              setTUR(data.TUR[0][1])
-            }
-            if (data?.EC?.length > 0) {
-              setEC(data.EC[0][1])
-            }
-          }
-
-          webSocket.onclose = () => {
-            console.log('Connection closed!')
-          }
-
-          return () => {
-            webSocket.close()
-          }
-        } else {
-          console.error('Setting data is null or empty')
-        }
-      } catch (error) {
-        console.log(error)
-      }
-    }
-
-
     const getStatusSwitch = async () => {
       try {
-        const setting: any = await readSetting()
         const token = JSON.parse(JSON.stringify(localStorage.getItem('token')))
+        const data = await getTelemetryTb(deviceId, token, ['pumpStatus'])
 
-        if (setting && setting.data && setting.data.length > 0) {
-          let { entityId } = setting.data[0]
-
-          const data = await getTelemetryTb(entityId, token, ['pumpStatus'])
-
-          if (data?.pumpStatus.length > 0) {
-            setSwitchState(data.pumpStatus[0].value === '0' ? false : true)
-          }
+        if (data?.pumpStatus.length > 0) {
+          setSwitchState(data.pumpStatus[0].value === '0' ? false : true)
         }
       } catch (error) {
         console.log(error)
       }
     }
     getStatusSwitch()
-    fetchLoginData()
   }, [])
+
+  useEffect(() => {
+    const handleCronjob = async () => {
+      const cronObj: ExecutedCronjob = executed_cronjob ? JSON.parse(executed_cronjob) : ''
+      const checkCron: string = global?.window?.localStorage.getItem('cronJob') ?? ''
+      // console.log('cronObj >>>>', executed_cronjob)
+      // console.log('checkCron >>>', checkCron, typeof checkCron)
+      // console.log('identical >>>', checkCron != executed_cronjob)
+
+      if (cronObj && checkCron != executed_cronjob) {
+        try {
+          const { data } = await getTasks(deviceId, cronObj.id)
+          await updateTaskStatus(cronObj.id, userId, 'success')
+          // console.log('cronjob Hẻeeeee')
+          // console.log('data', data)
+          data && setSwitchState((data[0].trigger_type == 'true') ? true : false)
+          global?.window?.localStorage.setItem('cronJob', executed_cronjob ?? '')
+        } catch (error) {
+          console.log('error', error)
+        }
+      }
+    }
+
+    handleCronjob()
+  }, [executed_cronjob])
 
   useEffect(() => {
 
@@ -174,30 +192,30 @@ export function Footer() {
 
     const sendData = async () => {
       const token = JSON.parse(JSON.stringify(localStorage.getItem('token')))
-      await sendDataTb('control_pump', switchState, token)
+      await sendDataTb('pump_relay', 'control', token, deviceId, (switchState ? 1 : 0))
     }
 
-    console.log('current switch state', switchState)
-    console.log('old switch state', prevSwitchState.current)
+    // console.log('current switch state', switchState)
+    // console.log('old switch state', prevSwitchState.current)
 
     if (prevSwitchState.current !== undefined && switchState !== undefined && prevSwitchState.current !== switchState) {
-      console.log('call here')
+      // console.log('call here')
       sendData()
     }
   }, [switchState])
 
   return (
     <div className="flex flex-col">
-      <div className="flex justify-between mx-4">
+      <div className="flex justify-between mx-4 items-center">
         <div className="flex flex-col">
-          <Calendar
+          {/* <Calendar
             mode="single"
             selected={date}
             disabled={{ before: new Date() }}
             onSelect={handlePickDate}
             className="rounded-md border"
           />
-          <TaskModal isOpen={isOpen} isSetOpen={isSetOpen} date={date} setDate={setDate} />
+          <TaskModal isOpen={isOpen} isSetOpen={isSetOpen} date={date} setDate={setDate} /> */}
         </div>
         <div className="flex items-end">
           <div>
@@ -205,6 +223,7 @@ export function Footer() {
             <Label htmlFor="airplane-mode">
               Pump State: {switchState ? 'On' : 'Off'} Mode
             </Label>
+            {/* <LineChartData chartData={ORP} title='demo' /> */}
           </div>
         </div>
       </div>
@@ -246,36 +265,48 @@ export function Footer() {
             <Card
               title="pH"
               icon={<Icons.droplet />}
-              value={pH}
+              value={Number((pH.at(pH.length - 1)?.value ?? 0)).toFixed(2)}
               unit={''}
               texts={['', 'Seawater PH', '']}
+              chartData={pH}
+              predictData={predictedPH}
+              deviceId={deviceId}
             />
           </SwiperSlide>
           <SwiperSlide>
             <Card
               title="ORP"
               icon={<Icons.gauge />}
-              value={ORP}
+              value={Number((ORP.at(ORP.length - 1)?.value ?? 0)).toFixed(2)}
               unit={'mV'}
               texts={['', 'Seawater Oxidation-reduction Potential', '']}
+              chartData={ORP}
+              predictData={predictedORP}
+              deviceId={deviceId}
             />
           </SwiperSlide>
           <SwiperSlide>
             <Card
               title="TUR"
               icon={<Icons.cloudRain />}
-              value={TUR}
+              value={Number((TUR.at(TUR.length - 1)?.value ?? 0)).toFixed(2)}
               unit={'NTU'}
               texts={['', 'Seawater Turbidity', '']}
+              chartData={TUR}
+              predictData={predictedTUR}
+              deviceId={deviceId}
             />
           </SwiperSlide>
           <SwiperSlide>
             <Card
               title="EC"
               icon={<Icons.temperature />}
-              value={EC}
+              value={Number((EC.at(EC.length - 1)?.value ?? 0)).toFixed(2)}
               unit={'μS/cm'}
               texts={['', 'Seawater Electrical Conductivity', '']}
+              chartData={EC}
+              predictData={predictedEC}
+              deviceId={deviceId}
             />
           </SwiperSlide>
         </Swiper>

@@ -15,9 +15,10 @@ import { useToast } from '@/hooks/use-toast'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Icons } from '@/components/icons'
-import { signInWithEmailAndPassword } from '@/actions'
+import { loginTb, signInWithEmailAndPassword } from '@/actions'
 import { useTransition } from 'react'
 import { redirect } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 
 const FormSchema = z.object({
   email: z.string().email(),
@@ -29,6 +30,7 @@ const FormSchema = z.object({
 export default function SignInForm() {
   const { toast } = useToast()
   const [isPending, startTransition] = useTransition()
+  const router = useRouter()
 
   const form = useForm<z.infer<typeof FormSchema>>({
     resolver: zodResolver(FormSchema),
@@ -39,10 +41,10 @@ export default function SignInForm() {
   })
 
   function onSubmit(data: z.infer<typeof FormSchema>) {
-    console.log('data', data)
     startTransition(async () => {
       const result = await signInWithEmailAndPassword(data)
-      console.log('result', result)
+      const { token } = await loginTb()
+
       const { error } = result
 
       if (error?.status) {
@@ -56,7 +58,8 @@ export default function SignInForm() {
           )
         })
       } else {
-        console.log('succes')
+        global?.window?.localStorage.setItem('token', token ?? '')
+
         toast({
           title: 'You submitted the following values:',
           description: (
@@ -65,7 +68,7 @@ export default function SignInForm() {
             </pre>
           )
         })
-        redirect('/')
+        router.push('/map')
       }
     })
   }

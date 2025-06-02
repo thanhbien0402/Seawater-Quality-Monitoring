@@ -9,8 +9,7 @@ import {
   DrawerTrigger
 } from '../ui/drawer'
 import { Button } from '../ui/button'
-import { Settings, User } from 'lucide-react'
-import { SettingForm } from '../forms/SettingForm'
+import { Settings } from 'lucide-react'
 
 export function SettingDrawer() {
   return (
@@ -24,11 +23,11 @@ export function SettingDrawer() {
         <DrawerHeader className="text-left">
           <DrawerTitle>Setting</DrawerTitle>
           <DrawerDescription>
-            Here you can adjust your telemetry settings to connect to
+            Here is your telemetry settings to connect to
             ThingsBoard:
           </DrawerDescription>
         </DrawerHeader>
-        <SettingForm />
+        {/* <SettingForm /> */}
         <DrawerFooter className="pt-2">
           <DrawerClose asChild>
             <Button variant="destructive">Cancel</Button>

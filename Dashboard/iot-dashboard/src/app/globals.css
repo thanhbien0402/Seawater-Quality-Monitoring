@@ -39,7 +39,16 @@ body {
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
     --radius: 0.5rem;
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
   }
+
   .dark {
     --background: 240 10% 3.9%;
     --foreground: 0 0% 98%;
@@ -65,6 +74,14 @@ body {
     --chart-3: 30 80% 55%;
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
   }
 }
 
@@ -72,7 +89,61 @@ body {
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground;
+  }
+
+  .marker {
+    transition: transform 0.2s ease;
+  }
+
+  .marker:hover {
+    transform: scale(1.2);
+  }
+
+  .mapboxgl-popup-content {
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    opacity: 1;
+    transform: translateY(-5px);
+  }
+
+  .mapboxgl-popup-content {
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+
+  .mapboxgl-popup-content.popup-open {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .mapboxgl-popup.custom-popup .mapboxgl-popup-content {
+    background: white;
+    border-radius: 0.75rem;
+    /* rounded corners */
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    padding: 1rem;
+    font-family: inherit;
+    color: #1f2937;
+    /* Tailwind’s gray-800 */
+  }
+
+  /* style the little triangle arrow */
+  .mapboxgl-popup.custom-popup .mapboxgl-popup-tip {
+    border-top-color: white;
+    /* match your background */
+  }
+
+  .mapboxgl-popup.custom-popup .mapboxgl-popup-close-button span {
+    font-size: 24px;
+    font-weight: bold;
+  }
+
+  .mapboxgl-popup.custom-popup .mapboxgl-popup-close-button {
+    width: 24px;
+    height: 24px;
+    padding: 8px;
   }
 }

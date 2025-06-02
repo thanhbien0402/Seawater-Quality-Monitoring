@@ -4,7 +4,7 @@
 #include "common_register.h"
 #include <HardwareSerial.h>
 #include "driver/uart.h"
-
+#include <vector>
 
 // extern HardwareSerial RS485Serial;
 // Usage examples

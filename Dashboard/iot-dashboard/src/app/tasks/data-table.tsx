@@ -118,7 +118,7 @@ export function DataTable<TData, TValue>({
                             <TableRow key={headerGroup.id}>
                                 {headerGroup.headers.map((header) => {
                                     return (
-                                        <TableHead key={header.id}>
+                                        <TableHead key={header.id} className="text-center">
                                             {header.isPlaceholder
                                                 ? null
                                                 : flexRender(
@@ -139,7 +139,7 @@ export function DataTable<TData, TValue>({
                                     data-state={row.getIsSelected() && "selected"}
                                 >
                                     {row.getVisibleCells().map((cell) => (
-                                        <TableCell key={cell.id} className="text-left">
+                                        <TableCell key={cell.id} className="text-center">
                                             {flexRender(cell.column.columnDef.cell, cell.getContext())}
                                         </TableCell>
                                     ))}

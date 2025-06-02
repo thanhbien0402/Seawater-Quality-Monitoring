@@ -235,7 +235,7 @@ esp_err_t nvs_store_again(DataStore data)
     uint64_t stored_data = data.Frame;
     char key[MAX_KEY_LENGTH];
     tail_iterator--;
-    sniprintf(key, sizeof(key), "key: %" PRIu16 "", tail_iterator);
+    snprintf(key, sizeof(key), "key: %" PRIu16 "", tail_iterator);
     err = nvs_set_u64(my_handle, key, stored_data);
     if (err != ESP_OK)
     {

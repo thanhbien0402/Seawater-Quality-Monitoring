@@ -31,7 +31,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { useGetUserSB } from "@/hooks/useGetUserSB"
 import { TaskUpdateModal } from "@/components/modals/TaskUpdateModal"
 import { useState } from "react"
-import { deleteTask } from "@/actions"
+import { deleteTask, sendDataTb } from "@/actions"
 
 // This type is used to define the shape of our data.
 // You can use a Zod schema here if you want.
@@ -49,7 +49,9 @@ export type Task = {
     task_date: string
     task_time: string
     trigger_type: string
-    status: string
+    status: string,
+    rpcID: number,
+    deviceId: string,
     createdAt: string
 }
 
@@ -141,7 +143,7 @@ export type Task = {
 //     },
 // ]
 
-export const getColumns = (loadTask: any): ColumnDef<Task>[] => [
+export const getColumns = (loadTask: any, deviceId: string): ColumnDef<Task>[] => [
     {
         id: "select",
         header: ({ table }) => (
@@ -232,7 +234,8 @@ export const getColumns = (loadTask: any): ColumnDef<Task>[] => [
         id: "actions",
         cell: ({ row }) => {
             const task = row.original
-            const { id } = task
+            // console.log('task >>>', task)
+            const { id, task_type, rpcID } = task
             const res = useGetUserSB()
             const userId = res.userInfo?.session.user.id
 
@@ -272,6 +275,8 @@ export const getColumns = (loadTask: any): ColumnDef<Task>[] => [
                         taskId={id}
                         userId={userId}
                         loadTask={loadTask}
+                        deviceId={deviceId}
+                        rpcID={rpcID}
                     />
                     <AlertDialog open={isDelete} onOpenChange={setIsDelete}>
                         <AlertDialogContent>
@@ -284,8 +289,11 @@ export const getColumns = (loadTask: any): ColumnDef<Task>[] => [
                             </AlertDialogHeader>
                             <AlertDialogFooter>
                                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction onClick={() => {
-                                    deleteTask(id, userId)
+                                <AlertDialogAction onClick={async () => {
+                                    const token = JSON.parse(JSON.stringify(localStorage.getItem('token')))
+
+                                    await deleteTask(id, userId)
+                                    await sendDataTb(task_type, 'delete', token, deviceId, rpcID)
                                     loadTask()
                                     toast({
                                         title: "You submitted the following values:",

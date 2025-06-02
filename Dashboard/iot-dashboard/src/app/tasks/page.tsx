@@ -4,9 +4,9 @@ import { Task, getColumns } from "./columns"
 import { DataTable } from "./data-table"
 import { useEffect, useState } from "react"
 
-async function getData(): Promise<Task[]> {
+async function getData(deviceId: string): Promise<Task[]> {
     // Fetch data from your API here.
-    const tasks = await getTasks()
+    const tasks = await getTasks(deviceId)
 
     return tasks.data && tasks.data.map(task => {
         return {
@@ -16,7 +16,17 @@ async function getData(): Promise<Task[]> {
             task_time: task.task_time,
             trigger_type: task.trigger_type,
             status: task.status,
-            createdAt: new Date(task.created_at).toISOString().split("T")[0],
+            rpcID: task.rpcID,
+            deviceId: task.deviceId,
+            createdAt: new Date(task.created_at).toLocaleString("en-GB", {
+                timeZone: "Asia/Bangkok",       // UTC+7
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+            }),
         }
     }) || []
 
@@ -34,11 +44,11 @@ async function getData(): Promise<Task[]> {
     // ]
 }
 
-export default function DemoPage() {
+export default function TaskTable({ deviceId }: { deviceId: string }) {
     const [data, setData] = useState<Task[]>([])
 
     const loadTask = async () => {
-        const res = await getData()
+        const res = await getData(deviceId)
         if (res) {
             setData(res)
         }
@@ -49,7 +59,7 @@ export default function DemoPage() {
         loadTask()
     }, [])
 
-    const columns = getColumns(loadTask)
+    const columns = getColumns(loadTask, deviceId)
 
 
     return (
